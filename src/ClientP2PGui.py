@@ -8,7 +8,7 @@ class ClientP2PGui:
     """
     ClientP2PGui - Implementação de um cliente de chat P2P com interface gráfica em Python. Esta classe fornece uma interface de usuário Tkinter para comunicação em rede ponto a ponto.
     """
-    def __init__(self, local_host, local_port, peers):
+    def __init__(self, local_host, local_port):
         """
         Inicializa o cliente P2P.
         
@@ -19,7 +19,7 @@ class ClientP2PGui:
         """
         self.local_host = local_host    
         self.local_port = local_port
-        self.peers = peers
+        self.peers = []                     # Lista de tuplas (host, port) dos peers
         
         # Configurações de rede
         self.server_socket = None           # Socket servidor
@@ -29,7 +29,7 @@ class ClientP2PGui:
         # Configuração da janela principal
         self.root = tk.Tk()
         self.root.title("P2P Chat - Não Conectado")
-        self.root.geometry("500x600")
+        self.root.geometry("500x700")
         self.root.configure(bg='#f0f0f0')
 
         # Definir fonte personalizada
@@ -40,42 +40,75 @@ class ClientP2PGui:
         self.setup_networking()
 
     def create_widgets(self):
-        """Cria e configura todos os widgets da interface gráfica."""
-        # Painel de configuração (estilo mais próximo do Java)
+        # Painel de configuração
         config_frame = tk.Frame(self.root, bg='#f0f0f0')
-        config_frame.pack(fill=tk.X, padx=10, pady=10)
+        config_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        username_label = tk.Label(config_frame, text="Nome de Usuário:", bg='#f0f0f0')
+        # Frame para username
+        username_frame = tk.Frame(config_frame, bg='#f0f0f0')
+        username_frame.pack(fill=tk.X, pady=5)
+        
+        username_label = tk.Label(username_frame, text="Nome de Usuário:", bg='#f0f0f0')
         username_label.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.username_entry = tk.Entry(config_frame, width=15)
+        self.username_entry = tk.Entry(username_frame, width=20)
         self.username_entry.pack(side=tk.LEFT, padx=5)
 
-        self.connect_button = tk.Button(
-            config_frame, 
-            text="Conectar", 
-            command=self.configure_username,
+        # Frame para peer host/port
+        peer_frame = tk.Frame(config_frame, bg='#f0f0f0')
+        peer_frame.pack(fill=tk.X, pady=5)
+        
+        peer_host_label = tk.Label(peer_frame, text="IP do Par:", bg='#f0f0f0')
+        peer_host_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.peer_host_entry = tk.Entry(peer_frame, width=15)
+        self.peer_host_entry.pack(side=tk.LEFT, padx=5)
+        
+        peer_port_label = tk.Label(peer_frame, text="Porta:", bg='#f0f0f0')
+        peer_port_label.pack(side=tk.LEFT, padx=(5, 5))
+        
+        self.peer_port_entry = tk.Entry(peer_frame, width=6)
+        self.peer_port_entry.pack(side=tk.LEFT, padx=5)
+
+        self.add_peer_button = tk.Button(
+            peer_frame,
+            text="Adicionar",
+            command=self.add_peer,
             bg='#e1e1e1',
             activebackground='#d0d0d0'
         )
-        self.connect_button.pack(side=tk.LEFT)
+        self.add_peer_button.pack(side=tk.LEFT, padx=5)
 
-        # Área de chat com mais espaçamento e estilo
+        # Lista de peers
+        self.peers_listbox = tk.Listbox(config_frame, height=3)
+        self.peers_listbox.pack(fill=tk.X, pady=5)
+
+        # Botão conectar
+        self.connect_button = tk.Button(
+            config_frame,
+            text="Conectar",
+            command=self.start_connection,
+            bg='#e1e1e1',
+            activebackground='#d0d0d0'
+        )
+        self.connect_button.pack(pady=5)
+
+        # Área de chat
         self.chat_area = scrolledtext.ScrolledText(
-            self.root, 
-            state='disabled', 
+            self.root,
+            state='disabled',
             wrap=tk.WORD,
             background='white',
             font=("Consolas", 10)
         )
         self.chat_area.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
 
-        # Painel de mensagem com layout mais próximo do Java
+        # Painel de mensagem
         message_frame = tk.Frame(self.root, bg='#f0f0f0')
         message_frame.pack(fill=tk.X, padx=10, pady=10)
 
         self.message_entry = tk.Entry(
-            message_frame, 
+            message_frame,
             width=40,
             font=self.default_font
         )
@@ -84,8 +117,8 @@ class ClientP2PGui:
         self.message_entry.config(state='disabled')
 
         self.send_button = tk.Button(
-            message_frame, 
-            text="Enviar", 
+            message_frame,
+            text="Enviar",
             command=self.send_message,
             bg='#e1e1e1',
             activebackground='#d0d0d0'
@@ -93,6 +126,54 @@ class ClientP2PGui:
         self.send_button.pack(side=tk.RIGHT)
         self.send_button.config(state='disabled')
 
+    def add_peer(self):
+        """Adiciona um novo peer à lista de peers."""
+        host = self.peer_host_entry.get().strip()
+        port = self.peer_port_entry.get().strip()
+        
+        try:
+            if not host:
+                messagebox.showerror("Erro", "Por favor, insira o IP do par")
+                return
+                
+            port_num = int(port)
+            peer = (host, port_num)
+            
+            if peer not in self.peers:
+                self.peers.append(peer)
+                self.peers_listbox.insert(tk.END, f"{host}:{port}")
+                self.peer_host_entry.delete(0, tk.END)
+                self.peer_port_entry.delete(0, tk.END)
+                self.log(f"[INFO] Par adicionado: {host}:{port}")
+            
+        except ValueError:
+            messagebox.showerror("Erro", "Por favor, insira uma porta válida")
+    
+    def start_connection(self):
+        """Inicia as conexões com os peers após validação."""
+        username = self.username_entry.get().strip()
+        if not username:
+            messagebox.showerror("Erro", "Por favor, insira um nome de usuário")
+            return
+            
+        if not self.peers:
+            messagebox.showerror("Erro", "Por favor, adicione pelo menos um par")
+            return
+            
+        # Iniciar conexões
+        self.connect_to_peers()
+        
+        # Atualizar interface
+        self.root.title(f"P2P Chat - {username}")
+        self.username_entry.config(state='disabled')
+        self.peer_host_entry.config(state='disabled')
+        self.peer_port_entry.config(state='disabled')
+        self.add_peer_button.config(state='disabled')
+        self.connect_button.config(state='disabled')
+        self.message_entry.config(state='normal')
+        self.send_button.config(state='normal')
+        self.message_entry.focus()
+    
     def configure_username(self):
         """Configura o nome de usuário e habilita a interface de chat."""
         username = self.username_entry.get().strip()
@@ -107,7 +188,7 @@ class ClientP2PGui:
             messagebox.showerror("Erro", "Por favor, insira um nome de usuário")
 
     def setup_networking(self):
-        """Configura a infraestrutura de rede, iniciando o servidor e as conexões."""
+        """Configura a infraestrutura de rede, iniciando o servidor."""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.local_host, self.local_port))
@@ -115,9 +196,8 @@ class ClientP2PGui:
         
         self.log(f"[SERVIDOR] Escutando em {self.local_host}:{self.local_port}")
 
-        # Threads para conexões e recebimento de mensagens
+        # Thread para conexões de entrada
         threading.Thread(target=self.accept_connections, daemon=True).start()
-        threading.Thread(target=self.connect_to_peers, daemon=True).start()
 
     def accept_connections(self):
         """Loop principal para aceitar conexões de entrada."""
@@ -132,13 +212,7 @@ class ClientP2PGui:
                 time.sleep(1)
 
     def handle_peer_connection(self, conn, addr):
-        """
-        Gerencia uma conexão específica com um peer.
-        
-        Args:
-            conn (socket): Socket da conexão
-            addr (tuple): Endereço do peer (host, port)
-        """
+        """Gerencia uma conexão específica com um peer."""
         try:
             while self.running:
                 data = conn.recv(1024).decode('utf-8').strip()
@@ -165,13 +239,7 @@ class ClientP2PGui:
                 self.log(f"[ERRO] Não foi possível conectar a {host}:{port}: {e}")
 
     def receive_messages(self, sock, peer):
-        """
-        Gerencia o recebimento de mensagens de um peer específico.
-        
-        Args:
-            sock (socket): Socket da conexão
-            peer (tuple): Endereço do peer (host, port)
-        """
+        """Gerencia o recebimento de mensagens de um peer específico."""
         try:
             while self.running:
                 data = sock.recv(1024).decode('utf-8').strip()
@@ -182,15 +250,11 @@ class ClientP2PGui:
             self.log(f"[ERRO] Falha ao receber mensagens de {peer}: {e}")
         finally:
             sock.close()
-            del self.peers_connections[peer]
+            if peer in self.peers_connections:
+                del self.peers_connections[peer]
 
     def send_message(self, event=None):
-        """
-        Envia uma mensagem para todos os peers conectados.
-        
-        Args:
-            event: Evento de tecla (opcional, usado para bind do Enter)
-        """
+        """Envia uma mensagem para todos os peers conectados."""
         message = self.message_entry.get().strip()
         if message:
             username = self.root.title().replace("P2P Chat - ", "")
@@ -206,12 +270,7 @@ class ClientP2PGui:
             self.message_entry.delete(0, tk.END)
 
     def log(self, message):
-        """
-        Registra uma mensagem na área de chat.
-        
-        Args:
-            message (str): Mensagem a ser exibida
-        """
+        """Registra uma mensagem na área de chat."""
         def update_chat():
             self.chat_area.config(state='normal')
             self.chat_area.insert(tk.END, message + "\n")
@@ -231,7 +290,7 @@ class ClientP2PGui:
 
 def main():
     """Função main para iniciar a aplicação."""
-    client = ClientP2PGui('127.0.0.1', 6787, [('127.0.0.1', 6789)])
+    client = ClientP2PGui('127.0.0.1', 6787)
     client.run()
 
 if __name__ == "__main__":

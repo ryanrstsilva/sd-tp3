@@ -11,46 +11,82 @@ import javax.swing.*;
  * Esta classe fornece uma interface de usuário Swing para comunicação em rede ponto a ponto.
  */
 public class ClientP2PGui extends JFrame {
-    // Configurações de rede
-    private final int localPort;                        
-    private final String localHost;
-    private final List<String> peerAddresses;
-    private ServerSocket serverSocket;
-    private final ExecutorService executorService;
-    private final List<PeerConnection> peerConnections;
-    private volatile boolean running = true;
+    private static final int LOCAL_PORT = 6789;             // Porta local para escutar conexões             
+    private static final String LOCAL_HOST = "127.0.0.1";   // Endereço IP local
+    private final List<String> peerAddresses;               // Lista de endereços dos peers para conectar
+    private ServerSocket serverSocket;                      // Socket servidor para aceitar conexões
+    private final ExecutorService executorService;          // Pool de threads para gerenciar conexões
+    private final List<PeerConnection> peerConnections;     // Lista de conexões ativas com peers
+    private volatile boolean running = true;                // Flag para controle do loop principal
 
     // Componentes Swing
-    private JTextField usernameField;
-    private JTextField messageField;
-    private JTextArea chatArea;
-    private JButton sendButton;
-    private JButton connectButton;
+    private JTextField usernameField;                   // Campo para nome de usuário
+    private JTextField peerHostField;                   // Campo para endereço IP do peer
+    private JTextField peerPortField;                   // Campo para porta de conexão do peer
+    private JTextField messageField;                    // Campo para digitar mensagens
+    private JTextArea chatArea;                         // Área de exibição do chat
+    private JButton sendButton;                         // Botão de enviar mensagem
+    private JButton connectButton;                      // Botão de conectar
+    private JButton addPeerButton;                      // Botão de adicioinar peer
+    private DefaultListModel<String> peerListModel;
+    private JList<String> peerList;
 
-    public ClientP2PGui(String localHost, int localPort, List<String> peerAddresses) {
-        this.localHost = localHost;
-        this.localPort = localPort;
-        this.peerAddresses = peerAddresses;
+    public ClientP2PGui() {
         this.executorService = Executors.newCachedThreadPool();
         this.peerConnections = new ArrayList<>();
-
+        this.peerAddresses = new ArrayList<>();
         initComponents();
         setupNetworking();
     }
 
     private void initComponents() {
         setTitle("P2P Chat - Não Conectado");
-        setSize(500, 600);
+        setSize(600, 700);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout(10, 10));
 
         // Painel de Configuração
-        JPanel configPanel = new JPanel(new FlowLayout());
+        JPanel configPanel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        // Linha 1: Username
+        gbc.gridx = 0; gbc.gridy = 0;
+        configPanel.add(new JLabel("Nome de Usuário:"), gbc);
+        gbc.gridx = 1; gbc.gridwidth = 2;
         usernameField = new JTextField(15);
+        configPanel.add(usernameField, gbc);
+
+        // Linha 2: Peer Host/Port
+        gbc.gridy = 1; gbc.gridx = 0; gbc.gridwidth = 1;
+        configPanel.add(new JLabel("IP do Par:"), gbc);
+        gbc.gridx = 1;
+        peerHostField = new JTextField(10);
+        configPanel.add(peerHostField, gbc);
+        gbc.gridx = 2;
+        configPanel.add(new JLabel("Porta do Par:"), gbc);
+        gbc.gridx = 3;
+        peerPortField = new JTextField(5);
+        configPanel.add(peerPortField, gbc);
+
+        // Botão Adicionar Par
+        gbc.gridy = 1; gbc.gridx = 4;
+        addPeerButton = new JButton("Adicionar");
+        configPanel.add(addPeerButton, gbc);
+
+        // Lista de Peers
+        gbc.gridy = 2; gbc.gridx = 0; gbc.gridwidth = 5;
+        peerListModel = new DefaultListModel<>();
+        peerList = new JList<>(peerListModel);
+        peerList.setVisibleRowCount(3);
+        JScrollPane peerScrollPane = new JScrollPane(peerList);
+        configPanel.add(peerScrollPane, gbc);
+
+        // Botão Conectar
+        gbc.gridy = 3; gbc.gridx = 1; gbc.gridwidth = 2;
         connectButton = new JButton("Conectar");
-        configPanel.add(new JLabel("Nome de Usuário:"));
-        configPanel.add(usernameField);
-        configPanel.add(connectButton);
+        configPanel.add(connectButton, gbc);
 
         // Área de Chat
         chatArea = new JTextArea();
@@ -70,13 +106,77 @@ public class ClientP2PGui extends JFrame {
         add(messagePanel, BorderLayout.SOUTH);
 
         // Listeners
-        connectButton.addActionListener(e -> configureUsername());
+        addPeerButton.addActionListener(e -> addPeer());
+        connectButton.addActionListener(e -> startConnection());
         sendButton.addActionListener(e -> sendMessage());
         messageField.addActionListener(e -> sendMessage());
 
         // Estado inicial
         messageField.setEnabled(false);
         sendButton.setEnabled(false);
+        log("[INFO] Servidor local iniciado em " + LOCAL_HOST + ":" + LOCAL_PORT);
+    }
+
+    private void addPeer() {
+        try {
+            String host = peerHostField.getText().trim();
+            int port = Integer.parseInt(peerPortField.getText().trim());
+            
+            if (host.isEmpty()) {
+                JOptionPane.showMessageDialog(this, 
+                    "Por favor, insira o IP do par", 
+                    "Erro", 
+                    JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            String peerAddress = host + ":" + port;
+            if (!peerListModel.contains(peerAddress)) {
+                peerListModel.addElement(peerAddress);
+                peerAddresses.add(peerAddress);
+                peerHostField.setText("");
+                peerPortField.setText("");
+                log("[INFO] Par adicionado: " + peerAddress);
+            }
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this,
+                "Por favor, insira uma porta válida",
+                "Erro",
+                JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void startConnection() {
+        String username = usernameField.getText().trim();
+        if (username.isEmpty()) {
+            JOptionPane.showMessageDialog(this, 
+                "Por favor, insira um nome de usuário", 
+                "Erro", 
+                JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (peerListModel.isEmpty()) {
+            JOptionPane.showMessageDialog(this, 
+                "Por favor, adicione pelo menos um par", 
+                "Erro", 
+                JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // Iniciar conexões com os peers
+        connectToPeers();
+            
+        // Atualizar interface
+        setTitle("P2P Chat - " + username);
+        usernameField.setEnabled(false);
+        peerHostField.setEnabled(false);
+        peerPortField.setEnabled(false);
+        addPeerButton.setEnabled(false);
+        connectButton.setEnabled(false);
+        messageField.setEnabled(true);
+        sendButton.setEnabled(true);
+        messageField.requestFocus();
     }
 
     private void configureUsername() {
@@ -97,13 +197,12 @@ public class ClientP2PGui extends JFrame {
 
     private void setupNetworking() {
         try {
-            serverSocket = new ServerSocket(localPort);
+            serverSocket = new ServerSocket(LOCAL_PORT);
             serverSocket.setReuseAddress(true);
-            log("[SERVIDOR] Escutando na porta " + localPort);
+            log("[SERVIDOR] Escutando na porta " + LOCAL_PORT);
 
             // Thread para aceitar conexões
             executorService.submit(this::acceptConnections);
-            connectToPeers();
         } catch (IOException e) {
             log("[ERRO] Falha ao iniciar servidor: " + e.getMessage());
         }
@@ -268,7 +367,7 @@ public class ClientP2PGui extends JFrame {
      */
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
-            ClientP2PGui client = new ClientP2PGui("127.0.0.1", 6789, Arrays.asList("127.0.0.1:6787"));
+            ClientP2PGui client = new ClientP2PGui();
             client.setVisible(true);
         });
     }
