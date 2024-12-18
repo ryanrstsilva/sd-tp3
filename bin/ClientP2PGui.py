@@ -290,7 +290,7 @@ class ClientP2PGui:
 
 def main():
     """Função main para iniciar a aplicação."""
-    client = ClientP2PGui('127.0.0.1', 6787)
+    client = ClientP2PGui('192.168.1.2', 6787)
     client.run()
 
 if __name__ == "__main__":
